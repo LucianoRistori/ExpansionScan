@@ -121,7 +121,7 @@ using std::vector;
 // Compile-time constant: maximum arrow length (in mm) on the plots
 //   (Option B: relatively large arrows → 500 mm max normalized length.)
 //------------------------------------------------------------------------------
-constexpr double MAX_ARROW_LEN = 200.0;
+constexpr double MAX_ARROW_LEN = 100.0;
 
 //------------------------------------------------------------------------------
 // Simple struct to hold displacement info
@@ -538,48 +538,80 @@ int main(int argc, char* argv[])
         dispAfter.begin(), dispAfter.end(),
         [](const Disp& a, const Disp& b){ return a.r  < b.r;  });
 
-    auto niceRange = [](double mn, double mx, int nBins = 50){
-        if (mx <= mn) mx = mn + 1.0;
-        double span = mx - mn;
-        mn -= 0.05 * span;
-        mx += 0.05 * span;
-        return std::make_tuple(mn, mx, nBins);
-    };
+	// Fixed histogram bin width: 1 µm = 0.001 mm
+	constexpr double BIN_WIDTH_MM = 0.001;
 
-    int nBins = 50;
+	// Helper: nice range + fixed physical bin width
+	auto niceRangeFixedBin = [](double mn, double mx, double binw)
+	{
+		if (mx <= mn) mx = mn + binw;
 
-    double dxB_min, dxB_max;
-    std::tie(dxB_min, dxB_max, nBins) = niceRange(minDxB_it->dx, maxDxB_it->dx, nBins);
+		// Add small margins
+		double span = mx - mn;
+		mn -= 0.05 * span;
+		mx += 0.05 * span;
 
-    double dyB_min, dyB_max;
-    int tmpBins;
-    std::tie(dyB_min, dyB_max, tmpBins) = niceRange(minDyB_it->dy, maxDyB_it->dy, nBins);
+		// Snap to bin grid so bin CENTERS are exact multiples of binw
+		double firstCenter = std::floor(mn / binw) * binw;
+		double lastCenter  = std::ceil (mx / binw) * binw;
 
-    double rB_min,  rB_max;
-    std::tie(rB_min, rB_max, tmpBins)  = niceRange(minRB_it->r,  maxRB_it->r,  nBins);
+		double xmin = firstCenter - 0.5 * binw;
+		double xmax = lastCenter  + 0.5 * binw;
 
-    double dxA_min, dxA_max;
-    std::tie(dxA_min, dxA_max, tmpBins) = niceRange(minDxA_it->dx, maxDxA_it->dx, nBins);
+		int nBins = static_cast<int>(
+			std::round((xmax - xmin) / binw)
+		);
 
-    double dyA_min, dyA_max;
-    std::tie(dyA_min, dyA_max, tmpBins) = niceRange(minDyA_it->dy, maxDyA_it->dy, nBins);
+		return std::make_tuple(xmin, xmax, nBins);
+	};
 
-    double rA_min,  rA_max;
-    std::tie(rA_min, rA_max, tmpBins)   = niceRange(minRA_it->r,  maxRA_it->r,  nBins);
+	// Compute ranges and bin counts (BEFORE)
+	double dxB_min, dxB_max; int nBinsDxB;
+	double dyB_min, dyB_max; int nBinsDyB;
+	double rB_min,  rB_max;  int nBinsRB;
 
-    TH1D* hDxBefore = new TH1D("hDxBefore", "dX before fit;dX [mm];Counts",
-                               nBins, dxB_min, dxB_max);
-    TH1D* hDyBefore = new TH1D("hDyBefore", "dY before fit;dY [mm];Counts",
-                               nBins, dyB_min, dyB_max);
-    TH1D* hRBefore  = new TH1D("hRBefore",  "R before fit;R [mm];Counts",
-                               nBins, rB_min, rB_max);
+	std::tie(dxB_min, dxB_max, nBinsDxB) =
+		niceRangeFixedBin(minDxB_it->dx, maxDxB_it->dx, BIN_WIDTH_MM);
+	std::tie(dyB_min, dyB_max, nBinsDyB) =
+		niceRangeFixedBin(minDyB_it->dy, maxDyB_it->dy, BIN_WIDTH_MM);
+	std::tie(rB_min, rB_max, nBinsRB) =
+		niceRangeFixedBin(minRB_it->r, maxRB_it->r, BIN_WIDTH_MM);
 
-    TH1D* hDxAfter  = new TH1D("hDxAfter",  "dX after fit;dX [mm];Counts",
-                               nBins, dxA_min, dxA_max);
-    TH1D* hDyAfter  = new TH1D("hDyAfter",  "dY after fit;dY [mm];Counts",
-                               nBins, dyA_min, dyA_max);
-    TH1D* hRAfter   = new TH1D("hRAfter",   "R after fit;R [mm];Counts",
-                               nBins, rA_min, rA_max);
+	// Compute ranges and bin counts (AFTER)
+	double dxA_min, dxA_max; int nBinsDxA;
+	double dyA_min, dyA_max; int nBinsDyA;
+	double rA_min,  rA_max;  int nBinsRA;
+
+	std::tie(dxA_min, dxA_max, nBinsDxA) =
+		niceRangeFixedBin(minDxA_it->dx, maxDxA_it->dx, BIN_WIDTH_MM);
+	std::tie(dyA_min, dyA_max, nBinsDyA) =
+		niceRangeFixedBin(minDyA_it->dy, maxDyA_it->dy, BIN_WIDTH_MM);
+	std::tie(rA_min, rA_max, nBinsRA) =
+		niceRangeFixedBin(minRA_it->r, maxRA_it->r, BIN_WIDTH_MM);
+
+	// Histogram declarations (Fill loop stays exactly as in v0.5)
+	TH1D* hDxBefore = new TH1D("hDxBefore","dX before fit;dX [mm];Counts",
+							   nBinsDxB, dxB_min, dxB_max);
+	TH1D* hDyBefore = new TH1D("hDyBefore","dY before fit;dY [mm];Counts",
+							   nBinsDyB, dyB_min, dyB_max);
+	TH1D* hRBefore  = new TH1D("hRBefore","R before fit;R [mm];Counts",
+							   nBinsRB, rB_min, rB_max);
+
+	TH1D* hDxAfter  = new TH1D("hDxAfter","dX after fit;dX [mm];Counts",
+							   nBinsDxA, dxA_min, dxA_max);
+	TH1D* hDyAfter  = new TH1D("hDyAfter","dY after fit;dY [mm];Counts",
+							   nBinsDyA, dyA_min, dyA_max);
+	TH1D* hRAfter   = new TH1D("hRAfter","R after fit;R [mm];Counts",
+							   nBinsRA, rA_min, rA_max);
+	
+	double xfontSize = 0.030;						   
+	hDxBefore->GetXaxis()->SetLabelSize(xfontSize);
+	hDyBefore->GetXaxis()->SetLabelSize(xfontSize);
+	hRBefore ->GetXaxis()->SetLabelSize(xfontSize);
+
+	hDxAfter ->GetXaxis()->SetLabelSize(xfontSize);
+	hDyAfter ->GetXaxis()->SetLabelSize(xfontSize);
+	hRAfter  ->GetXaxis()->SetLabelSize(xfontSize);
 
     for (size_t i = 0; i < n; ++i) {
         hDxBefore->Fill(dispBefore[i].dx);
@@ -723,10 +755,11 @@ int main(int argc, char* argv[])
         // arrow from warm to warm+normalized displacement
         double x2 = xx + arrowsBefore[i].dx;
         double y2 = yy + arrowsBefore[i].dy;
-        TArrow* arr = new TArrow(xx, yy, x2, y2, 0.03, ">");
-        arr->SetLineColor(ci);
-        arr->SetLineWidth(2);
-        arr->Draw("SAME");
+		
+		TArrow* arr = new TArrow(xx, yy, x2, y2, 0.0);  // 0.0 → no head
+		arr->SetLineColor(ci);
+		arr->SetLineWidth(2);
+		arr->Draw("SAME");
 
         if (drawLabels) {
             double Rmm = dispBefore[i].r;
