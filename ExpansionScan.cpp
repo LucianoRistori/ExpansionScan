@@ -337,28 +337,36 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // Parse arguments
-    vector<string> positional;
-    for (int i = 1; i < argc; ++i) {
-        string arg = argv[i];
-        if (arg == "--labels") {
-            drawLabels = true;
-        } else if (arg == "--dT") {
-            if (i + 1 >= argc) {
-                cerr << "Error: --dT requires a numeric value.\n";
-                return 1;
-            }
-            try {
-                deltaT = std::stod(argv[++i]);
-                haveDeltaT = true;
-            } catch (...) {
-                cerr << "Error: invalid value for --dT.\n";
-                return 1;
-            }
-        } else {
-            positional.push_back(arg);
-        }
-    }
+	// Parse arguments
+	vector<string> positional;
+	for (int i = 1; i < argc; ++i) {
+		string arg = argv[i];
+	
+		if (arg == "--labels") {
+			drawLabels = true;
+		}
+		else if (arg == "--dT") {
+			if (i + 1 >= argc) {
+				cerr << "Error: --dT requires a numeric value.\n";
+				return 1;
+			}
+			try {
+				deltaT = std::stod(argv[++i]);
+				haveDeltaT = true;
+			} catch (...) {
+				cerr << "Error: invalid value for --dT.\n";
+				return 1;
+			}
+		}
+		else if (!arg.empty() && arg[0] == '-') {
+			cerr << "Error: unknown option '" << arg << "'.\n";
+			return 1;
+		}
+		else {
+			positional.push_back(arg);
+		}
+	}
+
 
     if (positional.size() < 2) {
         cerr << "Error: need warm and cold files.\n";
