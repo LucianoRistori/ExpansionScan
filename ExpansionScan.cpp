@@ -536,6 +536,7 @@ int main(int argc, char* argv[])
 			std::cerr << "Error: cannot open CSV file '" << csvFile << "'\n";
 			return 1;
 		}
+		csv << std::fixed << std::setprecision(3);
 	
 		// Header
 		csv << "label,"
@@ -548,16 +549,15 @@ int main(int argc, char* argv[])
 		for (size_t i = 0; i < warmPts.size(); ++i) {
 			const auto& w = warmPts[i];
 			const auto& c = coldPts[i];
-	
 			csv << w.label << ","
-				<< w.coords[0] << "," << w.coords[1] << "," << w.coords[2] << ","
-				<< c.coords[0] << "," << c.coords[1] << "," << c.coords[2] << ","
-				<< dispBefore[i].dx * 1000.0 << ","
-				<< dispBefore[i].dy * 1000.0 << ","
-				<< dispBefore[i].r  * 1000.0 << ","
-				<< dispAfter[i].dx  * 1000.0 << ","
-				<< dispAfter[i].dy  * 1000.0 << ","
-				<< dispAfter[i].r   * 1000.0 << "\n";
+			<< w.coords[0] << "," << w.coords[1] << "," << w.coords[2] << ","
+			<< c.coords[0] << "," << c.coords[1] << "," << c.coords[2] << ","
+			<< static_cast<long>(std::lround(dispBefore[i].dx * 1000.0)) << ","
+			<< static_cast<long>(std::lround(dispBefore[i].dy * 1000.0)) << ","
+			<< static_cast<long>(std::lround(dispBefore[i].r  * 1000.0)) << ","
+			<< static_cast<long>(std::lround(dispAfter[i].dx  * 1000.0)) << ","
+			<< static_cast<long>(std::lround(dispAfter[i].dy  * 1000.0)) << ","
+			<< static_cast<long>(std::lround(dispAfter[i].r   * 1000.0)) << "\n";
 		}
 	
 		csv.close();
