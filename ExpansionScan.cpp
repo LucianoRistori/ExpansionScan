@@ -328,7 +328,7 @@ int main(int argc, char* argv[])
     bool haveDeltaT = false;
     double deltaT   = 0.0;
 
-    string warmFile, coldFile, outRoot("ExpansionScan.root");
+   string warmFile, coldFile, outRoot("ExpansionScan.root"), csvFile;
 
     if (argc < 3) {
         cerr << "Usage:\n"
@@ -358,6 +358,16 @@ int main(int argc, char* argv[])
 				return 1;
 			}
 		}
+		
+		
+		else if (arg == "--csv") {
+			if (i + 1 >= argc) {
+				cerr << "Error: --csv requires a filename.\n";
+				return 1;
+			}
+			csvFile = argv[++i];
+		}
+	
 		else if (!arg.empty() && arg[0] == '-') {
 			cerr << "Error: unknown option '" << arg << "'.\n";
 			return 1;
@@ -508,6 +518,51 @@ int main(int argc, char* argv[])
     cout << "    dY: mean = " << sDyA.mean << "  sigma = " << sDyA.sigma << "\n";
     cout << "     R: mean = " << sRA.mean  << "  sigma = " << sRA.sigma
          << "  RMS = " << rmsAfter << "\n";
+			 
+	// --- CSV output (additive, no side effects) ---
+	//
+	// Assumptions (already true in your code):
+	//   - vectors warmPts and coldPts exist and are matched 1:1
+	//   - dispBefore[i] and dispAfter[i] are already fully computed
+	//   - Point has fields: label (string), coords[0]=x, coords[1]=y, coords[2]=z
+	//   - Units: coords in mm, displacements in mm
+	//
+	// This block must be placed AFTER dispBefore / dispAfter are computed,
+	// and BEFORE any TApplication::Run() or ROOT event loop.
+	
+	if (!csvFile.empty()) {
+		std::ofstream csv(csvFile);
+		if (!csv) {
+			std::cerr << "Error: cannot open CSV file '" << csvFile << "'\n";
+			return 1;
+		}
+	
+		// Header
+		csv << "label,"
+			<< "x_warm_mm,y_warm_mm,z_warm_mm,"
+			<< "x_cold_mm,y_cold_mm,z_cold_mm,"
+			<< "dx_before_um,dy_before_um,r_before_um,"
+			<< "dx_after_um,dy_after_um,r_after_um\n";
+	
+		// Rows
+		for (size_t i = 0; i < warmPts.size(); ++i) {
+			const auto& w = warmPts[i];
+			const auto& c = coldPts[i];
+	
+			csv << w.label << ","
+				<< w.coords[0] << "," << w.coords[1] << "," << w.coords[2] << ","
+				<< c.coords[0] << "," << c.coords[1] << "," << c.coords[2] << ","
+				<< dispBefore[i].dx * 1000.0 << ","
+				<< dispBefore[i].dy * 1000.0 << ","
+				<< dispBefore[i].r  * 1000.0 << ","
+				<< dispAfter[i].dx  * 1000.0 << ","
+				<< dispAfter[i].dy  * 1000.0 << ","
+				<< dispAfter[i].r   * 1000.0 << "\n";
+		}
+	
+		csv.close();
+	}
+
 
     // Prepare ROOT
     int fakeArgc = 0;
