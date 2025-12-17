@@ -1,84 +1,111 @@
-//
+//==============================================================================
 // File: ExpansionScan.cpp
-// Version: 0.5
+// Version: 1.2
 //
 // Purpose:
-//   Given two CMM-style point files (warm and cold) with the same points
-//   in the same order, measure the in-plane thermal expansion/contraction
-//   of a flat plank by fitting a 2D similarity transform:
+//   Given two CMM-style point files (warm and cold) containing the same points
+//   in the same order, measure in-plane thermal expansion / contraction of a
+//   flat object by fitting a 2D similarity transform in the XY plane.
 //
-//       translation (tx, ty)
-//       uniform scale  s  (isotropic expansion/contraction)
-//       rotation      θ
+//   The fitted transform consists of:
+//     • translation (tx, ty)
+//     • uniform scale s  (isotropic expansion / contraction)
+//     • rotation θ
 //
-//   The fit is done in the XY plane ONLY; Z is ignored.
+//   Z coordinates are read but NOT used in the fit.
 //
-//   From the best-fit scale s and an optional temperature difference dT
-//   provided by the user, the code estimates the thermal expansion
-//   coefficient alpha:
+//   The program computes point-by-point displacements both BEFORE and AFTER
+//   the fit, produces diagnostic plots, and can optionally write a CSV summary
+//   of the results.
 //
-//       s ≈ 1 + alpha · dT   →   alpha ≈ (s - 1)/dT
+//------------------------------------------------------------------------------
+// Definitions (for each point i):
 //
-//   The program produces BEFORE- and AFTER-fit plots comparing the warm
-//   and cold coordinates.
+//   Warm coordinates: (xw_i, yw_i)
+//   Cold coordinates: (xc_i, yc_i)
 //
-//   For each point i, using warm (xw_i,yw_i) and cold (xc_i,yc_i):
+//   BEFORE fit:
+//     dX_i = xc_i - xw_i
+//     dY_i = yc_i - yw_i
+//     R_i  = sqrt(dX_i^2 + dY_i^2)
 //
-//     BEFORE fit:
-//       dX_i = xc_i - xw_i
-//       dY_i = yc_i - yw_i
-//       R_i  = sqrt(dX_i^2 + dY_i^2)
+//   AFTER fit:
+//     (xw_i, yw_i) → (xw’_i, yw’_i) via best-fit similarity transform
+//     dX’_i = xc_i - xw’_i
+//     dY’_i = yc_i - yw’_i
+//     R’_i  = sqrt(dX’_i^2 + dY’_i^2)
 //
-//     AFTER fit:
-//       (xw_i,yw_i) → (xw’_i,yw’_i) via best-fit similarity transform
-//       dX’_i = xc_i - xw’_i
-//       dY’_i = yc_i - yw’_i
-//       R’_i  = sqrt(dX’_i^2 + dY’_i^2)
+//------------------------------------------------------------------------------
+// Plots produced (all BEFORE and AFTER):
 //
-// Plots (all BEFORE and AFTER):
-//   • 3 histograms of dX, dY, R (before / after → 6 histograms total)
-//   • 2D XY scatter (warm positions) colored by R
-//   • 2D XY scatter (warm positions) colored by R and with arrows whose
-//     components (dX, dY) are normalized so that the longest arrow has
-//     length MAX_ARROW_LEN (compile-time constant).
-//   • Optional numeric labels at each point showing R or R’ when
-//     --labels is used.
+//   • Histograms of dX, dY, R (6 total: before + after)
+//     – Fixed physical bin width: 1 µm (0.001 mm)
 //
-// Additional textual output (v0.2+):
-//   • Summary statistics (mean, RMS) for dX, dY, R before and after fit.
+//   • XY scatter plots (warm positions):
+//     – Points colored by R
+//     – Arrows showing displacement direction
+//     – Common color scale for before/after for direct comparison
 //
+//   • Optional numeric labels at each point showing R or R’
+//     when --labels is specified.
+//
+//   • Output ROOT file and PNG snapshots are always produced.
+//
+//------------------------------------------------------------------------------
+// CSV output (optional):
+//
+//   When --csv <file> is specified, a CSV file is written containing one row
+//   per point, with the following columns:
+//
+//     label,
+//     x_warm_mm, y_warm_mm, z_warm_mm,
+//     x_cold_mm, y_cold_mm, z_cold_mm,
+//     dx_before_um, dy_before_um, r_before_um,
+//     dx_after_um,  dy_after_um,  r_after_um
+//
+//   Units and formatting:
+//     • Coordinates are in millimeters (mm), written with 3 decimal digits.
+//     • Displacements are in micrometers (µm), written as integers.
+//     • The CSV is purely additive: it does not affect plots or ROOT output.
+//
+//------------------------------------------------------------------------------
 // Usage:
-//   ./ExpansionScan [--labels] [--dT value] warm.txt cold.txt [out.root]
 //
-//   Positional arguments:
+//   ./ExpansionScan [options] warm.txt cold.txt [out.root]
+//
+//   Positional arguments (order is fixed):
 //     warm.txt   warm measurement file
 //     cold.txt   cold measurement file
-//     out.root   optional ROOT output file (default: ExpansionScan.root)
+//     out.root   optional ROOT output file
+//                (default: ExpansionScan.root)
 //
-//   Options:
-//     --labels          draw numeric R / R’ labels above each point
-//     --dT value        specify dT = Twarm - Tcold (in °C or K)
-//                        used to compute alpha ≈ (s - 1)/dT
+//   Options (may appear anywhere on the command line):
+//     --labels          draw numeric R / R’ labels on scatter plots
+//     --dT <value>      specify temperature difference (Twarm − Tcold)
+//                       used only to print alpha ≈ (s − 1)/dT
+//     --csv <file>     write CSV summary to <file>
 //
-// Input format (via Points.h / Points.cpp v3.x):
-//   First token on each line is interpreted as a label, followed by
-//   coordinates. For this tool, we request at least 3 coordinates
-//   (X, Y, Z). Z is read but not used.
+//   Unknown options are rejected with an error.
+//
+//------------------------------------------------------------------------------
+// Input format (via Points.h / Points.cpp):
+//
+//   Each line begins with a non-numeric label, followed by coordinates.
+//   This program requests at least 3 coordinates (X, Y, Z).
+//   Z is read but ignored.
 //
 //   Example line:
 //     P01  123.456  78.901  2.345
 //
+//------------------------------------------------------------------------------
 // Notes:
-//   - Only the first min(Nwarm,Ncold) points are used if the files have
-//     different lengths.
-//   - Z is ignored throughout.
-//   - All distances and coordinates are in mm.
-//   - Arrows are drawn in mm units; their lengths are normalized so that
-//     the maximum arrow length equals MAX_ARROW_LEN.
 //
-// Compilation (example):
-//   clang++ -std=c++17 ExpansionScan.cpp ../common/Points.cpp \
-//           `root-config --cflags --libs` -o ExpansionScan
+//   • Only the first min(Nwarm, Ncold) points are used if file lengths differ.
+//   • All internal computations use millimeters.
+//   • Arrow lengths are normalized so the maximum arrow length equals
+//     MAX_ARROW_LEN (compile-time constant).
+//   • The interactive ROOT session starts after all computations and outputs
+//     are completed.
 //
 //------------------------------------------------------------------------------
 
