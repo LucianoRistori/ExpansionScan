@@ -1,173 +1,144 @@
+/* ==============================================================================
+File:        ExpansionScan.cpp
+Version:     1.3.0
+Author:      Luciano Ristori
+
+Description:
+------------
+ExpansionScan analyzes thermal expansion effects by comparing two sets of
+measured 3D points (e.g. warm vs cold scans) acquired with a CMM.
+
+For each matched point, the program:
+  • Computes raw displacements (warm → cold)
+  • Fits a global expansion model
+  • Computes residual displacements after the fit
+  • Produces ROOT plots (histograms and XY scatter plots)
+  • Optionally writes a detailed CSV summary
+
+The program is designed to be run from a dataset-specific *results directory*.
+
+Input and output path handling:
+-------------------------------
+• Input files:
+    - Absolute paths are used as given
+    - Relative paths are interpreted relative to $CMM_DATA if set,
+      otherwise relative to the current working directory
+
+• Output files (ROOT, PNG, CSV):
+    - Absolute paths are used as given
+    - Relative paths are interpreted relative to $CMM_RESULTS/ExpansionScan
+      if CMM_RESULTS is set
+    - Otherwise, relative paths refer to the current working directory
+
+Command-line usage:
+-------------------
+ExpansionScan <warm.csv> <cold.csv> [output.root] [options]
+
+Positional arguments:
+  warm.csv        CSV file with warm measurements
+  cold.csv        CSV file with cold measurements
+  output.root     Optional ROOT output file
+                  (default: ExpansionScan.root)
+
+Options:
+  --labels            Draw point labels on XY scatter plots
+  --dT <value>        Specify temperature difference (ΔT)
+  --csv <file.csv>    Write a CSV summary of per-point results
+
+CSV output:
+-----------
+When --csv is specified, a CSV file is written with one row per point,
+containing:
+
+  label,
+  warm_x_mm, warm_y_mm, warm_z_mm,
+  cold_x_mm, cold_y_mm, cold_z_mm,
+  dx_before_um, dy_before_um, dr_before_um,
+  dx_after_um,  dy_after_um,  dr_after_um
+
+Formatting conventions:
+  • Coordinates in millimeters are written with 3 decimal digits
+  • Displacements in micrometers are written as integers
+
+Notes:
+------
+• Plotting behavior and --labels semantics are unchanged from previous versions
+• CSV generation does not alter any analysis or plotting logic
+• Executables and build artifacts are not tracked in git
+
+=============================================================================== */
+
+
+/* ============================== README.md ===================================
+
 # ExpansionScan
 
-v1.2.1
+**ExpansionScan** is a C++/ROOT tool for analyzing thermal expansion effects
+by comparing two sets of 3D point measurements (e.g. warm vs cold CMM scans).
 
-ExpansionScan is a C++ / ROOT utility to analyze in-plane thermal expansion
-(or contraction) of a flat object measured with a Coordinate Measurement
-Machine (CMM).
+The program computes raw displacements, fits a global expansion model, evaluates
+residuals after the fit, and produces both graphical output and optional CSV
+summaries.
 
-Given two point files corresponding to warm and cold measurements of
-the same object, the program:
+## Features
 
-- computes point-by-point displacements in the XY plane
-- fits a global 2D similarity transform (translation + rotation + scale)
-- evaluates residuals after removing the global expansion
-- produces diagnostic plots
-- optionally writes a detailed CSV summary
+- Reads two CSV point files with identical point ordering
+- Computes warm → cold displacements
+- Fits a global expansion model
+- Computes residual displacements after the fit
+- Produces ROOT histograms and XY scatter plots
+- Optional point labeling on scatter plots
+- Optional CSV output with per-point results
 
---------------------------------------------------------------------------
+## Build
 
-Features
+Requires:
+- C++17
+- ROOT (built with C++17 support)
 
-- 2D similarity fit in the XY plane (translation, rotation, uniform scale)
-- Displacements computed BEFORE and AFTER the fit
-- Histograms of dX, dY, and R (before and after)
-- XY scatter plots with color-coded displacement magnitude
-- Optional numeric labels at each point
-- ROOT file output and PNG snapshots
-- Optional CSV output with stable formatting
-
---------------------------------------------------------------------------
-
-Input format
-
-Input files are parsed using the shared Points.h / Points.cpp module.
-
-Each line must begin with a non-numeric label, followed by coordinates.
-At least three coordinates are required:
-
-    <label>  X  Y  Z
-
-Example:
-
-    P01  123.456  78.901  2.345
-
-- Coordinates are interpreted as millimeters
-- Z is read but NOT used in the fit
-
-The warm and cold files must contain the same points in the same order.
-
---------------------------------------------------------------------------
-
-Usage
-
-    ./ExpansionScan [options] warm.txt cold.txt [out.root]
-
-Positional arguments (order is fixed):
-
-- warm.txt   : warm measurement file
-- cold.txt   : cold measurement file
-- out.root   : optional ROOT output file
-               default: ExpansionScan.root
-
-Options (may appear anywhere on the command line):
-
-- --labels
-    Draw numeric displacement labels on scatter plots
-
-- --dT <value>
-    Temperature difference (Twarm − Tcold)
-    Used only to print the thermal expansion coefficient
-
-- --csv <file>
-    Write per-point CSV summary to <file>
-
-Unknown options are rejected with an error.
-
---------------------------------------------------------------------------
-
-Output
-
-ROOT and PNG output (always produced):
-
-- ROOT file containing all histograms and canvases
-- PNG snapshots of:
-  - displacement histograms (before / after fit)
-  - XY scatter plots with arrows and color scale
-
-CSV output (optional):
-
-When --csv <file> is specified, a CSV file is written with one row per point.
-
-Columns:
-
-    label,
-    x_warm_mm, y_warm_mm, z_warm_mm,
-    x_cold_mm, y_cold_mm, z_cold_mm,
-    dx_before_um, dy_before_um, r_before_um,
-    dx_after_um,  dy_after_um,  r_after_um
-
-Units and formatting:
-
-- Coordinates are in millimeters, written with 3 decimal digits
-- Displacements are in micrometers, written as integers
-- CSV output is purely additive and does not affect plots or ROOT output
-
---------------------------------------------------------------------------
-
-Definitions
-
-For each point i:
-
-Warm coordinates:
-    (xw, yw)
-
-Cold coordinates:
-    (xc, yc)
-
-Before fit:
-
-    dX = xc − xw
-    dY = yc − yw
-    R  = sqrt(dX^2 + dY^2)
-
-After fit:
-
-Warm coordinates are first transformed using the best-fit similarity transform:
-
-    (xw, yw) → (xw’, yw’)
-
-Residuals are then computed:
-
-    dX’ = xc − xw’
-    dY’ = yc − yw’
-    R’  = sqrt(dX’^2 + dY’^2)
-
---------------------------------------------------------------------------
-
-Build
-
-Requirements:
-
-- C++17 compiler
-- CERN ROOT (tested with Homebrew ROOT on macOS)
-
-Typical build:
-
-    make clean
+Build using:
     make
 
---------------------------------------------------------------------------
+## Usage
 
-Notes
+ExpansionScan <warm.csv> <cold.csv> [output.root] [options]
 
-- Only the first min(Nwarm, Ncold) points are used if file lengths differ
-- All internal computations use millimeters
-- Arrow lengths in scatter plots are normalized for readability
-- The interactive ROOT session starts after all computations and outputs
+Options:
+  --labels            Draw point labels on XY scatter plots
+  --dT <value>        Specify temperature difference ΔT
+  --csv <file.csv>    Write a detailed CSV summary
 
---------------------------------------------------------------------------
+## CSV Output Format
 
-Versioning
+Columns:
+  label,
+  warm_x_mm, warm_y_mm, warm_z_mm,
+  cold_x_mm, cold_y_mm, cold_z_mm,
+  dx_before_um, dy_before_um, dr_before_um,
+  dx_after_um,  dy_after_um,  dr_after_um
 
-v1.2 introduces:
+Formatting:
+- mm values: 3 decimal digits
+- µm values: integers
 
-- CSV output with before/after fit displacements
-- Stable numeric formatting
-- Updated documentation and usage
+## Directory Model
 
---------------------------------------------------------------------------
+Recommended layout:
 
-Author
+  ~/code/CMM/ExpansionScan
+  ~/Dropbox/CMM/data
+  ~/Dropbox/CMM/results/ExpansionScan/<run>
 
-Luciano Ristori
+Environment variables:
+  CMM_DATA     root directory for input data
+  CMM_RESULTS  root directory for output results
+
+## Versioning
+
+v1.3.0
+- Added CSV output with before/after fit displacements
+- Defined input/output directory model
+- Added support for CMM_DATA and CMM_RESULTS
+- No changes to plotting or analysis logic
+
+=============================================================================== */

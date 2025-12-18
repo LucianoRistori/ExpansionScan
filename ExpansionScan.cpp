@@ -1,113 +1,74 @@
-//==============================================================================
-// File: ExpansionScan.cpp
-// Version: 1.2
-//
-// Purpose:
-//   Given two CMM-style point files (warm and cold) containing the same points
-//   in the same order, measure in-plane thermal expansion / contraction of a
-//   flat object by fitting a 2D similarity transform in the XY plane.
-//
-//   The fitted transform consists of:
-//     • translation (tx, ty)
-//     • uniform scale s  (isotropic expansion / contraction)
-//     • rotation θ
-//
-//   Z coordinates are read but NOT used in the fit.
-//
-//   The program computes point-by-point displacements both BEFORE and AFTER
-//   the fit, produces diagnostic plots, and can optionally write a CSV summary
-//   of the results.
-//
-//------------------------------------------------------------------------------
-// Definitions (for each point i):
-//
-//   Warm coordinates: (xw_i, yw_i)
-//   Cold coordinates: (xc_i, yc_i)
-//
-//   BEFORE fit:
-//     dX_i = xc_i - xw_i
-//     dY_i = yc_i - yw_i
-//     R_i  = sqrt(dX_i^2 + dY_i^2)
-//
-//   AFTER fit:
-//     (xw_i, yw_i) → (xw’_i, yw’_i) via best-fit similarity transform
-//     dX’_i = xc_i - xw’_i
-//     dY’_i = yc_i - yw’_i
-//     R’_i  = sqrt(dX’_i^2 + dY’_i^2)
-//
-//------------------------------------------------------------------------------
-// Plots produced (all BEFORE and AFTER):
-//
-//   • Histograms of dX, dY, R (6 total: before + after)
-//     – Fixed physical bin width: 1 µm (0.001 mm)
-//
-//   • XY scatter plots (warm positions):
-//     – Points colored by R
-//     – Arrows showing displacement direction
-//     – Common color scale for before/after for direct comparison
-//
-//   • Optional numeric labels at each point showing R or R’
-//     when --labels is specified.
-//
-//   • Output ROOT file and PNG snapshots are always produced.
-//
-//------------------------------------------------------------------------------
-// CSV output (optional):
-//
-//   When --csv <file> is specified, a CSV file is written containing one row
-//   per point, with the following columns:
-//
-//     label,
-//     x_warm_mm, y_warm_mm, z_warm_mm,
-//     x_cold_mm, y_cold_mm, z_cold_mm,
-//     dx_before_um, dy_before_um, r_before_um,
-//     dx_after_um,  dy_after_um,  r_after_um
-//
-//   Units and formatting:
-//     • Coordinates are in millimeters (mm), written with 3 decimal digits.
-//     • Displacements are in micrometers (µm), written as integers.
-//     • The CSV is purely additive: it does not affect plots or ROOT output.
-//
-//------------------------------------------------------------------------------
-// Usage:
-//
-//   ./ExpansionScan [options] warm.txt cold.txt [out.root]
-//
-//   Positional arguments (order is fixed):
-//     warm.txt   warm measurement file
-//     cold.txt   cold measurement file
-//     out.root   optional ROOT output file
-//                (default: ExpansionScan.root)
-//
-//   Options (may appear anywhere on the command line):
-//     --labels          draw numeric R / R’ labels on scatter plots
-//     --dT <value>      specify temperature difference (Twarm − Tcold)
-//                       used only to print alpha ≈ (s − 1)/dT
-//     --csv <file>     write CSV summary to <file>
-//
-//   Unknown options are rejected with an error.
-//
-//------------------------------------------------------------------------------
-// Input format (via Points.h / Points.cpp):
-//
-//   Each line begins with a non-numeric label, followed by coordinates.
-//   This program requests at least 3 coordinates (X, Y, Z).
-//   Z is read but ignored.
-//
-//   Example line:
-//     P01  123.456  78.901  2.345
-//
-//------------------------------------------------------------------------------
-// Notes:
-//
-//   • Only the first min(Nwarm, Ncold) points are used if file lengths differ.
-//   • All internal computations use millimeters.
-//   • Arrow lengths are normalized so the maximum arrow length equals
-//     MAX_ARROW_LEN (compile-time constant).
-//   • The interactive ROOT session starts after all computations and outputs
-//     are completed.
-//
-//------------------------------------------------------------------------------
+/*
+==============================================================================
+File:        ExpansionScan.cpp
+Version:     1.3.0
+Author:      Luciano Ristori
+
+Description:
+------------
+ExpansionScan analyzes thermal expansion effects by comparing two sets of
+measured 3D points (e.g. warm vs cold scans) acquired with a CMM.
+
+For each matched point, the program:
+  • Computes raw displacements (warm → cold)
+  • Fits a global expansion model
+  • Computes residual displacements after the fit
+  • Produces ROOT plots (histograms and XY scatter plots)
+  • Optionally writes a detailed CSV summary
+
+The program is designed to be run from a dataset-specific *results directory*.
+
+Input and output path handling:
+-------------------------------
+• Input files:
+    - Absolute paths are used as given
+    - Relative paths are interpreted relative to $CMM_DATA if set,
+      otherwise relative to the current working directory
+
+• Output files (ROOT, PNG, CSV):
+    - Absolute paths are used as given
+    - Relative paths are interpreted relative to $CMM_RESULTS/ExpansionScan
+      if CMM_RESULTS is set
+    - Otherwise, relative paths refer to the current working directory
+
+Command-line usage:
+-------------------
+ExpansionScan <warm.csv> <cold.csv> [output.root] [options]
+
+Positional arguments:
+  warm.csv        CSV file with warm measurements
+  cold.csv        CSV file with cold measurements
+  output.root     Optional ROOT output file
+                  (default: ExpansionScan.root)
+
+Options:
+  --labels            Draw point labels on XY scatter plots
+  --dT <value>        Specify temperature difference (ΔT)
+  --csv <file.csv>    Write a CSV summary of per-point results
+
+CSV output:
+-----------
+When --csv is specified, a CSV file is written with one row per point,
+containing:
+
+  label,
+  warm_x_mm, warm_y_mm, warm_z_mm,
+  cold_x_mm, cold_y_mm, cold_z_mm,
+  dx_before_um, dy_before_um, dr_before_um,
+  dx_after_um,  dy_after_um,  dr_after_um
+
+Formatting conventions:
+  • Coordinates in millimeters are written with 3 decimal digits
+  • Displacements in micrometers are written as integers
+
+Notes:
+------
+• Plotting behavior and --labels semantics are unchanged from previous versions
+• CSV generation does not alter any analysis or plotting logic
+• Executables and build artifacts are not tracked in git
+
+==============================================================================
+*/
 
 #include <iostream>
 #include <fstream>
@@ -143,6 +104,50 @@ using std::cerr;
 using std::endl;
 using std::string;
 using std::vector;
+
+#include <cstdlib>
+#include <filesystem>
+
+///////////////////////////////////////////////
+// Helper functions                          //
+///////////////////////////////////////////////
+//
+// Resolve input path:
+//  - absolute → unchanged
+//  - relative → prepend CMM_DATA if set, else unchanged
+//
+static std::string resolveInputPath(const std::string& path)
+{
+    if (path.empty()) return path;
+
+    std::filesystem::path p(path);
+    if (p.is_absolute()) return path;
+
+    const char* base = std::getenv("CMM_DATA");
+    if (base && *base) {
+        return (std::filesystem::path(base) / p).string();
+    }
+
+    return path;
+}
+
+// Resolve output path:
+static std::string resolveOutputPath(const std::string& path)
+{
+    if (path.empty()) return path;
+
+    std::filesystem::path p(path);
+    if (p.is_absolute()) return path;
+
+    const char* base = std::getenv("CMM_RESULTS");
+    if (base && *base) {
+        return (std::filesystem::path(base) / "ExpansionScan" / p).string();
+    }
+
+    // No CMM_RESULTS: write to current working directory
+    return path;
+}
+
 
 //------------------------------------------------------------------------------
 // Compile-time constant: maximum arrow length (in mm) on the plots
@@ -416,6 +421,16 @@ int main(int argc, char* argv[])
     if (positional.size() >= 3) {
         outRoot = positional[2];
     }
+      
+    warmFile = resolveInputPath(warmFile);
+	coldFile = resolveInputPath(coldFile);
+
+	outRoot = resolveOutputPath(outRoot);
+
+	if (!csvFile.empty()) {
+    csvFile = resolveOutputPath(csvFile);
+}
+  
 
     cout << "\n====================================\n";
     cout << " ExpansionScan v0.4\n";
@@ -712,6 +727,7 @@ int main(int argc, char* argv[])
         hDyAfter->Fill (dispAfter[i].dy);
         hRAfter->Fill  (dispAfter[i].r);
     }
+   
 
     // Canvas for histograms: 2 rows (before, after) × 3 columns (dX, dY, R)
     TCanvas* cH = new TCanvas("cHists", "ExpansionScan: displacements", 1200, 800);
